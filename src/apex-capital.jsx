@@ -91,8 +91,9 @@ PRICE DATA RULES — MANDATORY:
 
 PORTFOLIO RULES:
 - Total account size: $10,000
-- Prefer options/spreads for capital efficiency and defined risk
-- NO short-selling common shares — use puts/put spreads for bearish plays
+- Prefer straight calls and puts for simplicity and liquidity — do NOT suggest call spreads or bull call spreads
+- For bullish plays: use straight calls (single leg) only
+- For bearish plays: use straight puts or put spreads only — NO short-selling common shares
 - Every options position includes: number of contracts, expiry, strike, premium per contract, total dollar cost
 - Every equity position includes: number of shares, price per share, total dollar cost
 - Note when assuming fractional share capability

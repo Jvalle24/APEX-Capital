@@ -476,6 +476,56 @@ function ApexChart({ type, title, color, data, series }) {
   )
 }
 
+// ─── Live option price fetcher for play cards ─────────────────────────────────
+// Fetches the real market premium for a suggested option contract the moment
+// APEX responds — so the user always sees the actual price, not APEX's estimate.
+function useLivePlayPrices(plays) {
+  const [livePrices, setLivePrices] = useState({}) // keyed by play index
+
+  useEffect(() => {
+    if (!plays?.length) return
+    let cancelled = false
+
+    async function fetchAll() {
+      const results = await Promise.all(
+        plays.map(async (play, i) => {
+          const isEq = /equity|stock|share/i.test(play.vehicle || '')
+          if (isEq) {
+            // For equity: fetch stock price
+            try {
+              const res = await window.fetch(`/api/price/${play.ticker}?interval=1d&range=1d`)
+              const data = await res.json()
+              const meta = data?.chart?.result?.[0]?.meta
+              if (meta?.regularMarketPrice) return { i, price: meta.regularMarketPrice, type: 'stock' }
+            } catch {}
+            return { i, price: null }
+          } else {
+            // For options: parse OCC symbol and fetch real premium
+            const occ = parseOCCSymbol(play.ticker, play.contract)
+            if (!occ) return { i, price: null, occ: null }
+            try {
+              const res = await window.fetch(`/api/price/${encodeURIComponent(occ)}?interval=1d&range=1d`)
+              const data = await res.json()
+              const meta = data?.chart?.result?.[0]?.meta
+              if (meta?.regularMarketPrice) return { i, price: meta.regularMarketPrice, occ, type: 'option' }
+            } catch {}
+            return { i, price: null, occ, type: 'option' }
+          }
+        })
+      )
+      if (cancelled) return
+      const map = {}
+      results.forEach(r => { map[r.i] = r })
+      setLivePrices(map)
+    }
+
+    fetchAll()
+    return () => { cancelled = true }
+  }, [plays?.map(p => p.contract + p.ticker).join('|')]) // eslint-disable-line
+
+  return livePrices
+}
+
 // ─── PlaySummaryCard ──────────────────────────────────────────────────────────
 function Stars({ n }) {
   return (
@@ -488,6 +538,7 @@ function Stars({ n }) {
 function PlaySummaryCard({ plays, onAddToPortfolio, portfolioPositions = [] }) {
   const [addingIdx, setAddingIdx] = useState(null)
   const [addAmount, setAddAmount] = useState('')
+  const livePlayPrices = useLivePlayPrices(plays)
 
   if (!plays.length) return null
 
@@ -498,13 +549,16 @@ function PlaySummaryCard({ plays, onAddToPortfolio, portfolioPositions = [] }) {
 
   function handleOpenAdd(i, play) {
     setAddingIdx(i)
+    // Pre-fill with suggested dollar amount; live price shown separately
     setAddAmount(String(Math.round((play.size / 100) * 10000)))
   }
 
-  function handleConfirmAdd(play) {
+  function handleConfirmAdd(play, livePrice) {
     const dollar = parseFloat(addAmount)
     if (!isNaN(dollar) && dollar > 0 && onAddToPortfolio) {
-      onAddToPortfolio({ ...play, dollarInvested: dollar })
+      // Use live premium as entry if available, else fall back to APEX's estimate
+      const entryOverride = livePrice != null ? String(livePrice) : undefined
+      onAddToPortfolio({ ...play, dollarInvested: dollar, ...(entryOverride ? { entry: entryOverride } : {}) })
     }
     setAddingIdx(null)
     setAddAmount('')
@@ -520,18 +574,26 @@ function PlaySummaryCard({ plays, onAddToPortfolio, portfolioPositions = [] }) {
           p => p.ticker === play.ticker && p.entry === play.entry && p.status === 'open'
         )
 
-        const entryNum = parseFloat(play.entry)
+        // Live price from Yahoo Finance (real market data)
+        const liveData = livePlayPrices[i]
+        const livePrice = liveData?.price ?? null
+        const isEq = /equity|stock|share/i.test(play.vehicle || '')
+        const hasFetchedLive = liveData !== undefined // fetch attempted
+        const liveAvailable = livePrice != null
+
+        // Use live price for entry in R/R calc if available, else APEX's estimate
+        const effectiveEntry = liveAvailable ? livePrice : parseFloat(play.entry)
         const targetNum = parseFloat(play.target)
         const stopNum = parseFloat(play.stop)
         let rrRatio = null
         let upPct = null
         let downPct = null
-        if (!isNaN(entryNum) && !isNaN(targetNum) && !isNaN(stopNum) && entryNum > 0) {
-          const reward = Math.abs(targetNum - entryNum)
-          const risk = Math.abs(entryNum - stopNum)
+        if (!isNaN(effectiveEntry) && !isNaN(targetNum) && !isNaN(stopNum) && effectiveEntry > 0) {
+          const reward = Math.abs(targetNum - effectiveEntry)
+          const risk = Math.abs(effectiveEntry - stopNum)
           rrRatio = risk > 0 ? (reward / risk).toFixed(1) : null
-          upPct = ((reward / entryNum) * 100).toFixed(1)
-          downPct = ((risk / entryNum) * 100).toFixed(1)
+          upPct = ((reward / effectiveEntry) * 100).toFixed(1)
+          downPct = ((risk / effectiveEntry) * 100).toFixed(1)
         }
 
         return (
@@ -622,7 +684,7 @@ function PlaySummaryCard({ plays, onAddToPortfolio, portfolioPositions = [] }) {
                   (suggested: ${Math.round(dollar).toLocaleString()})
                 </span>
                 <button
-                  onClick={() => handleConfirmAdd(play)}
+                  onClick={() => handleConfirmAdd(play, livePrice)}
                   style={{
                     background: C.green, border: 'none', borderRadius: 6,
                     color: '#000', fontFamily: F.mono, fontSize: 11, fontWeight: 700,
@@ -644,31 +706,55 @@ function PlaySummaryCard({ plays, onAddToPortfolio, portfolioPositions = [] }) {
               </div>
             )}
 
-            {/* Contract detail */}
+            {/* Contract detail + live price */}
             {play.contract && (
-              <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, background: C.blue + '08' }}>
-                <span style={{ fontFamily: F.mono, fontSize: 10, color: C.blue, letterSpacing: 1, textTransform: 'uppercase', marginRight: 8 }}>
+              <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, background: C.blue + '08', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <span style={{ fontFamily: F.mono, fontSize: 10, color: C.blue, letterSpacing: 1, textTransform: 'uppercase', flexShrink: 0 }}>
                   CONTRACT DETAIL
                 </span>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.text }}>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.text, flex: 1 }}>
                   {play.contract}
                 </span>
+                {/* Live market price badge */}
+                {!isEq && (
+                  <span style={{
+                    fontFamily: F.mono, fontSize: 11, flexShrink: 0,
+                    padding: '2px 10px', borderRadius: 5,
+                    background: liveAvailable ? C.green + '20' : C.amber + '15',
+                    border: `1px solid ${liveAvailable ? C.green : C.amber}`,
+                    color: liveAvailable ? C.green : C.amber,
+                  }}>
+                    {!hasFetchedLive
+                      ? '⟳ fetching live…'
+                      : liveAvailable
+                        ? `● LIVE $${livePrice.toFixed(2)}`
+                        : '⚠ price unavailable'}
+                  </span>
+                )}
+                {isEq && liveAvailable && (
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.green, background: C.green + '20', border: `1px solid ${C.green}`, borderRadius: 5, padding: '2px 10px', flexShrink: 0 }}>
+                    ● LIVE ${livePrice.toFixed(2)}
+                  </span>
+                )}
               </div>
             )}
 
             {/* Entry / Target / Stop */}
             <div style={{ display: 'flex', gap: 0 }}>
               {[
-                { label: 'ENTRY', val: play.entry, col: C.sub },
+                { label: 'ENTRY', val: liveAvailable ? livePrice.toFixed(2) : play.entry, col: liveAvailable ? C.green : C.sub, live: liveAvailable },
                 { label: 'TARGET', val: play.target, col: C.green },
                 { label: 'STOP', val: play.stop, col: C.red },
-              ].map(({ label, val, col }) => (
+              ].map(({ label, val, col, live }) => (
                 <div key={label} style={{
                   flex: 1, padding: '10px 14px',
                   borderRight: `1px solid ${C.border}`,
                   borderTop: `1px solid ${C.border}`,
                 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.muted, marginBottom: 4, letterSpacing: 1 }}>{label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <span style={{ fontFamily: F.mono, fontSize: 10, color: C.muted, letterSpacing: 1 }}>{label}</span>
+                    {live && <span style={{ fontFamily: F.mono, fontSize: 9, color: C.green, background: C.green + '20', borderRadius: 3, padding: '0 4px' }}>LIVE</span>}
+                  </div>
                   <div style={{ fontFamily: F.mono, fontSize: 14, color: col, fontWeight: 600 }}>{val ?? '—'}</div>
                 </div>
               ))}

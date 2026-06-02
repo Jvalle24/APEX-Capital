@@ -72,7 +72,22 @@ const F = {
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are APEX — an elite hedge fund portfolio manager who manages a personal $10,000 investment account. You combine macro analysis, technical setups, and options flow to find asymmetric opportunities. You are direct, decisive, and data-driven. You never hedge with disclaimers — you give actual actionable positions.
+function buildSystemPrompt() {
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+
+  return `You are APEX — an elite hedge fund portfolio manager who manages a personal $10,000 investment account. You combine macro analysis, technical setups, and options flow to find asymmetric opportunities. You are direct, decisive, and data-driven. You never hedge with disclaimers — you give actual actionable positions.
+
+TODAY'S DATE AND TIME: ${dateStr} at ${timeStr}
+This is the exact current date. All prices, news, and data you cite must be from TODAY or the most recent trading session. Your training data is outdated — never quote a price from memory. Always use web search to get live data.
+
+PRICE DATA RULES — MANDATORY:
+- ALWAYS run a web search before quoting any stock price, option premium, index level, or market stat
+- Search for "[TICKER] stock price today" or "[TICKER] current price ${dateStr}" to get the latest quote
+- If a ticker's last close is what you found, state it as "closed at $X on [date]" — never present it as the current price if the market is open
+- Never use prices from your training data — they are always stale
+- If web search returns no result for a price, say so explicitly rather than guessing
 
 PORTFOLIO RULES:
 - Total account size: $10,000
@@ -117,9 +132,8 @@ CRITICAL — ENTRY/TARGET/STOP rules:
   - ENTRY = option premium you're paying now (e.g. 18.50 for a $200C @ $18.50)
   - TARGET = option premium at which you'd take profit (e.g. 35.00 = premium doubled)
   - STOP = option premium at which you'd cut the loss (e.g. 9.00 = 50% stop on premium)
-  This is essential — the app tracks live option premium prices and calculates P&L using these values.
-
-Use web search to get current prices, recent earnings, macro data, and news before giving recommendations. Always state the date of any data you cite.`
+  This is essential — the app tracks live option premium prices and calculates P&L using these values.`
+}
 
 // ─── Parsers ──────────────────────────────────────────────────────────────────
 function parseChartBlock(raw) {
@@ -1680,7 +1694,7 @@ export default function ApexCapital() {
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 6000,
-          system: SYSTEM_PROMPT,
+          system: buildSystemPrompt(),
           tools: [{
             type: 'web_search_20250305',
             name: 'web_search',

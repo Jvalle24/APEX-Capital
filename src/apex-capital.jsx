@@ -89,6 +89,13 @@ PRICE DATA RULES — MANDATORY:
 - Never use prices from your training data — they are always stale
 - If web search returns no result for a price, say so explicitly rather than guessing
 
+OPTIONS CONTRACT RULES — MANDATORY:
+- NEVER invent or estimate option strikes, premiums, or expiry dates — they must come from a real options chain
+- Search "[TICKER] options chain" or "[TICKER] calls [month] [year]" to find real strikes and premiums before suggesting any contract
+- Only suggest expiries that are AT LEAST 45 days out from today (${dateStr}) — no short-dated weeklies or monthlies expiring within 6 weeks
+- Use standard monthly expiries (third Friday of the month) unless a specific LEAPS date makes more sense
+- The premium you quote must match what is actually tradeable on the market — if you cannot verify it via search, say so and give a range instead
+
 PORTFOLIO RULES:
 - Total account size: $10,000
 - Prefer straight calls and puts for simplicity and liquidity — do NOT suggest call spreads or bull call spreads
